@@ -23,6 +23,7 @@ export class MermaidImageModal extends Modal {
   private viewport: HTMLElement;
   private svgEl: SVGSVGElement;
   private zoomSelect: HTMLSelectElement;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(app: App, svg: SVGSVGElement, settings: BetterMermaidSettings) {
     super(app);
@@ -44,10 +45,32 @@ export class MermaidImageModal extends Modal {
     this.svgEl = this.svg.cloneNode(true) as SVGSVGElement;
     this.svgEl.removeAttribute('width');
     this.svgEl.removeAttribute('height');
+    // Strip inline styles that Obsidian may have added (e.g. max-width:100%)
+    // so they don't interfere with the modal's own sizing.
+    this.svgEl.removeAttribute('style');
+    // Explicitly enforce uniform scaling so the diagram content is never
+    // stretched non-uniformly even if CSS dimensions change.
+    this.svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     this.svgEl.addClass('better-mermaid-svg');
+
+    // Fix text squeezing: inject CSS into the SVG so that foreignObject
+    // content wraps properly instead of overflowing or being clipped.
+    this.fixTextOverflow();
 
     this.viewport = contentEl.createDiv({ cls: 'better-mermaid-viewport' });
     this.viewport.appendChild(this.svgEl);
+
+    // Defer the initial size calculation until the browser has finished laying
+    // out the modal (flex layout).  The ResizeObserver below handles subsequent
+    // size changes (e.g. window resize).
+    requestAnimationFrame(() => {
+      this.fitSvgToViewport();
+    });
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.fitSvgToViewport();
+    });
+    this.resizeObserver.observe(this.viewport);
 
     const controls = this.viewport.createDiv({ cls: 'better-mermaid-controls' });
 
@@ -84,6 +107,11 @@ export class MermaidImageModal extends Modal {
 
   onClose() {
     const doc = this.viewport.ownerDocument;
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
 
     doc.removeEventListener('mousemove', this.onMouseMove);
     doc.removeEventListener('mouseup', this.onMouseUp);
@@ -175,6 +203,83 @@ export class MermaidImageModal extends Modal {
     this.svgEl.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.scale})`;
   }
 
+  /**
+   * Size the SVG to fit within the viewport while preserving its native
+   * aspect ratio (derived from the viewBox attribute).  Without this the
+   * CSS `width:100%; height:100%` would stretch the diagram
+   * non-uniformly, squeezing text in one direction.
+   */
+  private fitSvgToViewport() {
+    const viewBox = this.svgEl.getAttribute('viewBox');
+    if (!viewBox) return;
+
+    const parts = viewBox.split(/\s+/).map(Number);
+    if (parts.length !== 4) return;
+
+    const vbWidth = parts[2];
+    const vbHeight = parts[3];
+    if (!vbWidth || !vbHeight) return;
+
+    const vpRect = this.viewport.getBoundingClientRect();
+    const vpWidth = vpRect.width;
+    const vpHeight = vpRect.height;
+    if (!vpWidth || !vpHeight) return;
+
+    const svgAspect = vbWidth / vbHeight;
+    const vpAspect = vpWidth / vpHeight;
+
+    let svgWidth: number;
+    let svgHeight: number;
+
+    if (svgAspect > vpAspect) {
+      // SVG is wider than viewport — fit by width
+      svgWidth = vpWidth;
+      svgHeight = vpWidth / svgAspect;
+    } else {
+      // SVG is taller or equal — fit by height
+      svgHeight = vpHeight;
+      svgWidth = vpHeight * svgAspect;
+    }
+
+    this.svgEl.style.width = `${svgWidth}px`;
+    this.svgEl.style.height = `${svgHeight}px`;
+  }
+
+  /**
+   * Fix text squeezing inside mermaid SVG nodes.
+   *
+   * Mermaid's layout engine often underestimates the width needed for CJK
+   * text and emoji, leaving foreignObject containers too narrow.  We inject
+   * a <style> element into the cloned SVG that:
+   *  1. Slightly reduces the base font-size so existing text fits better.
+   *  2. Forces word-wrap on foreignObject content to prevent horizontal
+   *     overflow.
+   *  3. Ensures node labels remain visible and readable.
+   */
+  private fixTextOverflow() {
+    // Walk every foreignObject and set inline styles directly on child
+    // elements so the fix survives SVG→string→Image serialization (used by
+    // svgToPng).  Injected <style> elements are unreliable in that path.
+    const fos = this.svgEl.querySelectorAll('foreignObject');
+    fos.forEach((fo) => {
+      fo.setAttribute('style', 'font-size:13px;line-height:1.35');
+      const walker = fo.ownerDocument.createTreeWalker(
+        fo,
+        NodeFilter.SHOW_ELEMENT,
+      );
+      let node: Element | null = walker.currentNode as Element;
+      while (node) {
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'div' || tag === 'p' || tag === 'span') {
+          (node as HTMLElement).style.overflowWrap = 'break-word';
+          (node as HTMLElement).style.wordBreak = 'break-word';
+          (node as HTMLElement).style.whiteSpace = 'normal';
+        }
+        node = walker.nextNode() as Element | null;
+      }
+    });
+  }
+
   private async handleDownload(btn: HTMLButtonElement) {
     btn.setText(this.t('converting'));
     btn.disabled = true;
@@ -193,7 +298,11 @@ export class MermaidImageModal extends Modal {
   }
 
   private svgToPng(): Promise<string> {
-    const cloned = this.svg.cloneNode(true) as SVGSVGElement;
+    // Clone the modal's SVG (which has fixTextOverflow CSS injected)
+    // rather than the original reading-mode SVG.
+    const cloned = this.svgEl.cloneNode(true) as SVGSVGElement;
+    // Remove the CSS transform (zoom/pan) so the export is at native size.
+    cloned.style.removeProperty('transform');
     const viewBox = cloned.getAttribute('viewBox');
     if (viewBox) {
       const parts = viewBox.split(/\s+/).map(Number);
