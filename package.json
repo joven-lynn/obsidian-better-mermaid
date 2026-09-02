@@ -1,6 +1,6 @@
 {
   "name": "obsidian-better-mermaid",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Enhance Mermaid diagrams with click-to-zoom and custom CSS injection",
   "main": "main.js",
   "scripts": {
