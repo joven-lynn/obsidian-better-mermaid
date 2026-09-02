@@ -72,10 +72,19 @@ Each slider has a reset button to restore default values.
 }
 ```
 
+## Troubleshooting
+
+**Cannot open the plugin's settings tab** (the page is blank/unresponsive, console shows `TypeError: e.display is not a function`)
+
+- **Cause**: since v1.0.6 the settings tab uses the declarative settings API (`getSettingDefinitions()`), which requires Obsidian **1.13.0 or later**. On older versions Obsidian still tries to render the tab through the legacy `display()` method, which is no longer implemented.
+- **Fix**: update Obsidian to 1.13.0 or newer — Settings → About → Check for updates. You can see your current version in Settings → About.
+- Note: `manifest.json` declares `minAppVersion: 1.13.0`, so installs from the community directory automatically block older Obsidian versions; only manually copied (sideloaded) plugins can end up running on an outdated Obsidian.
+
 ## Compatibility
 
-- Minimum Obsidian version: **0.15.0**
+- Minimum Obsidian version: **1.13.0** (required by the declarative settings API used for the settings tab)
 - Works on both desktop and mobile
+- Mobile: pinch to zoom, single-finger pan, double-tap to zoom, share-sheet / vault save for PNG export
 
 ## License
 
