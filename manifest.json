@@ -2,7 +2,7 @@
   "id": "better-mermaid",
   "name": "Better Mermaid",
   "version": "1.0.6",
-  "minAppVersion": "1.0.0",
+  "minAppVersion": "1.13.0",
   "description": "Enhance Mermaid diagrams with click-to-zoom and custom CSS injection.",
   "author": "Joven Lynn",
   "authorUrl": "",

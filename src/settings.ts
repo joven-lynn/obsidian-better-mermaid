@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab } from 'obsidian';
+import type { SettingDefinition, SettingDefinitionItem } from 'obsidian';
 import type BetterMermaidPlugin from './main';
 
 export interface BetterMermaidSettings {
@@ -91,121 +92,114 @@ export class BetterMermaidSettingTab extends PluginSettingTab {
     return i18n(this.plugin.settings.language, key);
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    const s = this.plugin.settings;
+  /**
+   * Declarative settings (Obsidian 1.13+): the definitions are rendered by
+   * Obsidian and indexed into the settings search.  This requires
+   * minAppVersion 1.13.0; older runtimes are no longer supported.
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    const reset = (key: keyof BetterMermaidSettings): SettingDefinition => ({
+      name: this.t('reset'),
+      action: () => {
+        const settings = this.plugin.settings as unknown as Record<
+          string,
+          unknown
+        >;
+        const defaults = DEFAULT_SETTINGS as unknown as Record<string, unknown>;
+        settings[key] = defaults[key];
+        void this.plugin.saveSettings();
+        this.update();
+      },
+    });
 
-    new Setting(containerEl).setName(this.t('settingsTitle')).setHeading();
+    return [
+      {
+        type: 'group',
+        heading: this.t('settingsTitle'),
+        items: [
+          {
+            name: this.t('languageLabel'),
+            desc: this.t('languageDesc'),
+            control: {
+              type: 'dropdown',
+              key: 'language',
+              options: { en: 'English', zh: '中文' },
+            },
+          },
+          {
+            name: this.t('enableClickToZoom'),
+            desc: this.t('enableClickToZoomDesc'),
+            control: { type: 'toggle', key: 'enableClickToZoom' },
+          },
+          {
+            name: this.t('modalWidth'),
+            desc: this.t('modalWidthDesc'),
+            control: {
+              type: 'slider',
+              key: 'modalWidthPercent',
+              min: 30,
+              max: 100,
+              step: 5,
+              displayFormat: (value) => `${value}%`,
+            },
+          },
+          reset('modalWidthPercent'),
+          {
+            name: this.t('modalHeight'),
+            desc: this.t('modalHeightDesc'),
+            control: {
+              type: 'slider',
+              key: 'modalHeightPercent',
+              min: 30,
+              max: 100,
+              step: 5,
+              displayFormat: (value) => `${value}%`,
+            },
+          },
+          reset('modalHeightPercent'),
+          {
+            name: this.t('defaultZoomLevel'),
+            desc: this.t('defaultZoomLevelDesc'),
+            control: {
+              type: 'slider',
+              key: 'defaultZoomLevel',
+              min: 20,
+              max: 200,
+              step: 5,
+              displayFormat: (value) => `${value}%`,
+            },
+          },
+          reset('defaultZoomLevel'),
+          {
+            name: this.t('customCss'),
+            desc: this.t('customCssDesc'),
+            control: {
+              type: 'textarea',
+              key: 'customCss',
+              rows: 8,
+              placeholder: this.t('customCssPlaceholder'),
+            },
+          },
+        ],
+      },
+    ];
+  }
 
-    new Setting(containerEl)
-      .setName(this.t('languageLabel'))
-      .setDesc(this.t('languageDesc'))
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption('en', 'English')
-          .addOption('zh', '中文')
-          .setValue(s.language)
-          .onChange(async (value: 'en' | 'zh') => {
-            s.language = value;
-            await this.plugin.saveSettings();
-            this.display();
-          })
-      );
+  getControlValue(key: string): unknown {
+    const settings = this.plugin.settings as unknown as Record<
+      string,
+      unknown
+    >;
+    return settings[key];
+  }
 
-    new Setting(containerEl)
-      .setName(this.t('enableClickToZoom'))
-      .setDesc(this.t('enableClickToZoomDesc'))
-      .addToggle((toggle) =>
-        toggle.setValue(s.enableClickToZoom).onChange(async (value) => {
-          s.enableClickToZoom = value;
-          await this.plugin.saveSettings();
-        })
-      );
-
-	    const modalWidthSetting = new Setting(containerEl)
-	      .setName(this.t('modalWidth'))
-	      .setDesc(`${this.t('modalWidthDesc')} (${s.modalWidthPercent}%)`)
-	      .addSlider((slider) =>
-	        slider
-	          .setLimits(30, 100, 5)
-	          .setValue(s.modalWidthPercent)
-	          .setDynamicTooltip()
-	          .onChange(async (value) => {
-	            s.modalWidthPercent = value;
-	            modalWidthSetting.descEl.innerText = `${this.t('modalWidthDesc')} (${value}%)`;
-	            await this.plugin.saveSettings();
-	          })
-	      )
-	      .addButton((btn) =>
-	        btn
-	          .setButtonText(this.t('reset'))
-	          .onClick(async () => {
-	            s.modalWidthPercent = DEFAULT_SETTINGS.modalWidthPercent;
-	            await this.plugin.saveSettings();
-	            this.display();
-	          })
-	      );
-
-	    const modalHeightSetting = new Setting(containerEl)
-	      .setName(this.t('modalHeight'))
-	      .setDesc(`${this.t('modalHeightDesc')} (${s.modalHeightPercent}%)`)
-		      .addSlider((slider) =>
-		        slider
-		          .setLimits(30, 100, 5)
-		          .setValue(s.modalHeightPercent)
-		          .setDynamicTooltip()
-		          .onChange(async (value) => {
-		            s.modalHeightPercent = value;
-		            modalHeightSetting.descEl.innerText = `${this.t('modalHeightDesc')} (${value}%)`;
-		            await this.plugin.saveSettings();
-		          })
-		      )
-			      .addButton((btn) =>
-		        btn
-		          .setButtonText(this.t('reset'))
-		          .onClick(async () => {
-		            s.modalHeightPercent = DEFAULT_SETTINGS.modalHeightPercent;
-		            await this.plugin.saveSettings();
-		            this.display();
-		          })
-		      );
-
-		    const zoomSetting = new Setting(containerEl)
-		      .setName(this.t('defaultZoomLevel'))
-		      .setDesc(`${this.t('defaultZoomLevelDesc')} (${s.defaultZoomLevel}%)`)
-			    .addSlider((slider) =>
-			        slider
-			          .setLimits(20, 200, 5)
-			          .setValue(s.defaultZoomLevel)
-			          .setDynamicTooltip()
-			          .onChange(async (value) => {
-			            s.defaultZoomLevel = value;
-			            zoomSetting.descEl.innerText = `${this.t('defaultZoomLevelDesc')} (${value}%)`;
-			            await this.plugin.saveSettings();
-			          })
-			      )
-		      .addButton((btn) =>
-		        btn
-		          .setButtonText(this.t('reset'))
-		          .onClick(async () => {
-		            s.defaultZoomLevel = DEFAULT_SETTINGS.defaultZoomLevel;
-		            await this.plugin.saveSettings();
-		            this.display();
-		          })
-		      );
-
-	    new Setting(containerEl)
-	      .setName(this.t('customCss'))
-      .setDesc(this.t('customCssDesc'))
-      .addTextArea((textarea) =>
-        textarea
-          .setPlaceholder(this.t('customCssPlaceholder'))
-          .setValue(s.customCss)
-          .onChange(async (value) => {
-            s.customCss = value;
-            await this.plugin.saveSettings();
-          })
-      );
+  setControlValue(key: string, value: unknown): Promise<void> {
+    const settings = this.plugin.settings as unknown as Record<
+      string,
+      unknown
+    >;
+    settings[key] = value;
+    // Persist and re-inject the generated CSS (custom CSS / modal size).
+    return this.plugin.saveSettings();
   }
 }
