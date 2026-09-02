@@ -44,7 +44,11 @@ div.mermaid {
 .better-mermaid-viewport svg {
   /* No sizing constraints: the SVG's rendered size may exceed the viewport
      when zoomed in, so max-width/max-height rules would clamp it.  The
-     viewport flex-centers it; modal.ts sets exact pixel dimensions. */
+     viewport flex-centers it; modal.ts sets exact pixel dimensions.
+     flex-shrink must stay 0 — otherwise the flex container squeezes the SVG
+     back to the viewport size once it grows beyond it, silently capping
+     the zoom while the zoom display keeps counting up. */
+  flex-shrink: 0;
 }
 
 .better-mermaid-controls {

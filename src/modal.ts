@@ -1,4 +1,4 @@
-import { Modal, App } from 'obsidian';
+import { Modal, App, Notice, Platform } from 'obsidian';
 import type { BetterMermaidSettings } from './settings';
 import { i18n } from './settings';
 
@@ -113,7 +113,9 @@ export class MermaidImageModal extends Modal {
     const fitBtn = controls.createEl('button', { text: this.t('fitView') });
     fitBtn.addEventListener('click', () => this.resetView());
 
-    const btn = controls.createEl('button', { text: this.t('downloadPng') });
+    const btn = controls.createEl('button', {
+      text: Platform.isMobile ? this.t('savePng') : this.t('downloadPng'),
+    });
     btn.addEventListener('click', () => {
       void this.handleDownload(btn);
     });
@@ -480,20 +482,74 @@ export class MermaidImageModal extends Modal {
   }
 
   private async handleDownload(btn: HTMLButtonElement) {
+    const originalText = Platform.isMobile
+      ? this.t('savePng')
+      : this.t('downloadPng');
     btn.setText(this.t('converting'));
     btn.disabled = true;
     try {
       const pngDataUrl = await this.svgToPng();
-      const doc = this.contentEl.ownerDocument;
-      const link = doc.createElement('a');
-      link.download = 'mermaid-diagram.png';
-      link.href = pngDataUrl;
-      link.click();
+      if (Platform.isMobile) {
+        await this.savePngOnMobile(pngDataUrl);
+      } else {
+        const doc = this.contentEl.ownerDocument;
+        const link = doc.createElement('a');
+        link.download = 'mermaid-diagram.png';
+        link.href = pngDataUrl;
+        link.click();
+      }
     } catch (e) {
       console.error('Failed to convert SVG to PNG:', e);
+      new Notice(this.t('pngSaveFailed'));
     }
-    btn.setText(this.t('downloadPng'));
+    btn.setText(originalText);
     btn.disabled = false;
+  }
+
+  /**
+   * Mobile webviews can't download <a download> data URLs, so try the
+   * system share sheet first (save to Files/Photos, send to other apps)
+   * and fall back to writing the PNG into the vault when sharing is
+   * unavailable or fails.
+   */
+  private async savePngOnMobile(pngDataUrl: string) {
+    const blob = this.dataUrlToBlob(pngDataUrl);
+    const fileName = `mermaid-${Date.now()}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+
+    const shareable = navigator as Navigator & {
+      canShare?: (data: { files: File[] }) => boolean;
+      share?: (data: { files: File[]; title?: string }) => Promise<void>;
+    };
+    if (shareable.canShare && shareable.share) {
+      if (shareable.canShare({ files: [file] })) {
+        try {
+          await shareable.share({ files: [file], title: fileName });
+          return;
+        } catch (err) {
+          // The user dismissed the share sheet — not an error.
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            return;
+          }
+        }
+      }
+    }
+
+    const arrayBuffer = await blob.arrayBuffer();
+    await this.app.vault.createBinary(fileName, arrayBuffer);
+    new Notice(`${this.t('savedToVault')}${fileName}`);
+  }
+
+  private dataUrlToBlob(dataUrl: string): Blob {
+    const comma = dataUrl.indexOf(',');
+    const mimeMatch = /^data:([^;]+);/.exec(dataUrl.slice(0, comma));
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
   }
 
   private svgToPng(): Promise<string> {

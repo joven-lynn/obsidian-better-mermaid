@@ -42,6 +42,9 @@ const STRINGS: Record<string, Record<string, string>> = {
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
     fitView: 'Fit',
+    savePng: 'Save PNG',
+    savedToVault: 'Saved to vault: ',
+    pngSaveFailed: 'Failed to save PNG',
   },
   zh: {
     settingsTitle: 'Better Mermaid 设置',
@@ -65,6 +68,9 @@ const STRINGS: Record<string, Record<string, string>> = {
     zoomIn: '放大',
     zoomOut: '缩小',
     fitView: '适应',
+    savePng: '保存 PNG',
+    savedToVault: '已保存到仓库: ',
+    pngSaveFailed: 'PNG 保存失败',
   },
 };
 
