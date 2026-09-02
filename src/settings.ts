@@ -39,6 +39,9 @@ const STRINGS: Record<string, Record<string, string>> = {
     converting: 'Converting...',
     defaultZoomLevel: 'Default zoom level',
     defaultZoomLevelDesc: 'Initial zoom level when opening a Mermaid diagram (percentage)',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    fitView: 'Fit',
   },
   zh: {
     settingsTitle: 'Better Mermaid 设置',
@@ -59,6 +62,9 @@ const STRINGS: Record<string, Record<string, string>> = {
     converting: '转换中...',
     defaultZoomLevel: '默认缩放级别',
     defaultZoomLevelDesc: '打开 Mermaid 图表时的初始缩放级别（百分比）',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    fitView: '适应',
   },
 };
 

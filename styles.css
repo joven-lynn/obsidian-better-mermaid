@@ -22,6 +22,12 @@ div.mermaid {
   flex: 1;
   cursor: grab;
   background: var(--background-primary);
+  /* Let the plugin handle pan/pinch itself; without this the browser
+     hijacks touch gestures for page scrolling and zooming on mobile. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .better-mermaid-viewport.better-mermaid-grabbing {
@@ -35,6 +41,7 @@ div.mermaid {
   max-width: 100%;
   max-height: 100%;
   transform-origin: 0 0;
+  will-change: transform;
 }
 
 .better-mermaid-controls {
@@ -98,4 +105,33 @@ div.mermaid {
 .better-mermaid-controls button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Mobile (phones & tablets): force a near-fullscreen sheet so the diagram
+   viewport gets a real height — otherwise the percentage height chain
+   collapses and the modal renders as a short, landscape strip.  Desktop
+   keeps the user-configured percentages injected by main.ts; the higher
+   specificity makes these rules win on touch devices. */
+body.is-mobile .better-mermaid-modal-size {
+  width: 96vw;
+  max-width: 96vw;
+  height: 92vh;
+  max-height: 92vh;
+}
+
+body.is-mobile .better-mermaid-controls {
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+body.is-mobile .better-mermaid-controls button,
+body.is-mobile .better-mermaid-controls select {
+  min-height: 32px;
+  font-size: 13px;
+}
+
+body.is-mobile .better-mermaid-controls label {
+  display: none;
 }

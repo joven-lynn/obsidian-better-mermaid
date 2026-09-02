@@ -9,6 +9,13 @@ const ZOOM_OPTIONS = [
   { label: '100%', value: 1.0 },
 ];
 
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 10;
+const ZOOM_STEP = 1.5;
+// Two taps within this window and distance are treated as a double-tap.
+const DOUBLE_TAP_MS = 300;
+const TAP_MOVE_TOLERANCE = 12;
+
 export class MermaidImageModal extends Modal {
   private svg: SVGSVGElement;
   private settings: BetterMermaidSettings;
@@ -16,6 +23,7 @@ export class MermaidImageModal extends Modal {
   private panX = 0;
   private panY = 0;
   private isDragging = false;
+  private dragMoved = false;
   private dragStartX = 0;
   private dragStartY = 0;
   private panStartX = 0;
@@ -24,6 +32,14 @@ export class MermaidImageModal extends Modal {
   private svgEl: SVGSVGElement;
   private zoomSelect: HTMLSelectElement;
   private resizeObserver: ResizeObserver | null = null;
+
+  // Active touch/pen/mouse pointers (coordinates relative to the viewport).
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinchStartDist = 0;
+  private pinchStartScale = 1;
+  private lastTapTime = 0;
+  private lastTapX = 0;
+  private lastTapY = 0;
 
   constructor(app: App, svg: SVGSVGElement, settings: BetterMermaidSettings) {
     super(app);
@@ -89,37 +105,76 @@ export class MermaidImageModal extends Modal {
       this.setZoom(parseFloat(this.zoomSelect.value));
     });
 
-    this.applyTransform();
-    this.syncZoomDisplay(this.scale);
+    this.addZoomButton(controls, '−', 'zoomOut', () =>
+      this.zoomBy(1 / ZOOM_STEP),
+    );
+    this.addZoomButton(controls, '+', 'zoomIn', () => this.zoomBy(ZOOM_STEP));
+
+    const fitBtn = controls.createEl('button', { text: this.t('fitView') });
+    fitBtn.addEventListener('click', () => this.resetView());
 
     const btn = controls.createEl('button', { text: this.t('downloadPng') });
     btn.addEventListener('click', () => {
       void this.handleDownload(btn);
     });
 
-    const doc = this.viewport.ownerDocument;
-
+    // Pointer events unify mouse (desktop) and touch (mobile) input.
+    // `touch-action: none` (see styles.css) keeps the browser from hijacking
+    // touch gestures for page scrolling/zooming.
     this.viewport.addEventListener('wheel', this.onWheel, { passive: false });
-    this.viewport.addEventListener('mousedown', this.onMouseDown);
-    doc.addEventListener('mousemove', this.onMouseMove);
-    doc.addEventListener('mouseup', this.onMouseUp);
+    this.viewport.addEventListener('pointerdown', this.onPointerDown);
+    this.viewport.addEventListener('pointermove', this.onPointerMove);
+    this.viewport.addEventListener('pointerup', this.onPointerUp);
+    this.viewport.addEventListener('pointercancel', this.onPointerCancel);
   }
 
   onClose() {
-    const doc = this.viewport.ownerDocument;
-
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     }
 
-    doc.removeEventListener('mousemove', this.onMouseMove);
-    doc.removeEventListener('mouseup', this.onMouseUp);
+    this.viewport.removeEventListener('wheel', this.onWheel);
+    this.viewport.removeEventListener('pointerdown', this.onPointerDown);
+    this.viewport.removeEventListener('pointermove', this.onPointerMove);
+    this.viewport.removeEventListener('pointerup', this.onPointerUp);
+    this.viewport.removeEventListener('pointercancel', this.onPointerCancel);
+
+    this.pointers.clear();
+    this.pinchStartDist = 0;
     this.contentEl.empty();
     this.scale = 1;
     this.panX = 0;
     this.panY = 0;
     this.isDragging = false;
+    this.dragMoved = false;
+  }
+
+  private addZoomButton(
+    parent: HTMLElement,
+    text: string,
+    ariaKey: string,
+    onClick: () => void,
+  ) {
+    const button = parent.createEl('button', { text });
+    button.setAttribute('aria-label', this.t(ariaKey));
+    button.addEventListener('click', onClick);
+  }
+
+  private zoomBy(factor: number) {
+    this.setZoom(this.clampScale(this.scale * factor));
+  }
+
+  private resetView() {
+    this.panX = 0;
+    this.panY = 0;
+    this.scale = 1;
+    this.applyTransform();
+    this.syncZoomDisplay(1);
+  }
+
+  private clampScale(scale: number): number {
+    return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
   }
 
   private setZoom(scale: number) {
@@ -161,7 +216,7 @@ export class MermaidImageModal extends Modal {
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       const factor = 1 - e.deltaY * 0.005;
-      const newScale = Math.max(0.1, Math.min(10, this.scale * factor));
+      const newScale = this.clampScale(this.scale * factor);
       this.panX = mx - (mx - this.panX) * (newScale / this.scale);
       this.panY = my - (my - this.panY) * (newScale / this.scale);
       this.scale = newScale;
@@ -174,30 +229,156 @@ export class MermaidImageModal extends Modal {
     this.applyTransform();
   };
 
-  private onMouseDown = (e: MouseEvent) => {
-    if (e.button !== 0) return;
+  private onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest('.better-mermaid-controls')) return;
-    this.isDragging = true;
-    this.dragStartX = e.clientX;
-    this.dragStartY = e.clientY;
-    this.panStartX = this.panX;
-    this.panStartY = this.panY;
-    this.viewport.addClass('better-mermaid-grabbing');
+
+    const pos = this.pointerPos(e);
+    this.pointers.set(e.pointerId, pos);
+    try {
+      this.viewport.setPointerCapture(e.pointerId);
+    } catch {
+      // Some webviews reject capture; panning still works without it.
+    }
+
+    if (this.pointers.size === 1) {
+      this.isDragging = true;
+      this.dragMoved = false;
+      this.dragStartX = pos.x;
+      this.dragStartY = pos.y;
+      this.panStartX = this.panX;
+      this.panStartY = this.panY;
+      this.viewport.addClass('better-mermaid-grabbing');
+    } else if (this.pointers.size === 2) {
+      this.pinchStartDist = this.pointerDistance();
+      this.pinchStartScale = this.scale;
+    }
   };
 
-  private onMouseMove = (e: MouseEvent) => {
-    if (!this.isDragging) return;
-    this.panX = this.panStartX + (e.clientX - this.dragStartX);
-    this.panY = this.panStartY + (e.clientY - this.dragStartY);
-    this.applyTransform();
+  private onPointerMove = (e: PointerEvent) => {
+    if (!this.pointers.has(e.pointerId)) return;
+    const pos = this.pointerPos(e);
+    this.pointers.set(e.pointerId, pos);
+
+    if (this.pointers.size >= 2 && this.pinchStartDist > 0) {
+      const dist = this.pointerDistance();
+      if (dist <= 0) return;
+      this.dragMoved = true;
+      const newScale = this.clampScale(
+        this.pinchStartScale * (dist / this.pinchStartDist),
+      );
+      // Keep the diagram point under the pinch midpoint stationary.
+      const mid = this.pointerMidpoint();
+      this.panX = mid.x - (mid.x - this.panX) * (newScale / this.scale);
+      this.panY = mid.y - (mid.y - this.panY) * (newScale / this.scale);
+      this.scale = newScale;
+      this.syncZoomDisplay(newScale);
+    } else if (this.pointers.size === 1 && this.isDragging) {
+      if (
+        Math.hypot(pos.x - this.dragStartX, pos.y - this.dragStartY) >
+        TAP_MOVE_TOLERANCE
+      ) {
+        this.dragMoved = true;
+      }
+      if (e.cancelable) e.preventDefault();
+      this.panX = this.panStartX + (pos.x - this.dragStartX);
+      this.panY = this.panStartY + (pos.y - this.dragStartY);
+      this.applyTransform();
+    }
   };
 
-  private onMouseUp = () => {
-    if (!this.isDragging) return;
+  private onPointerUp = (e: PointerEvent) => {
+    const tracked = this.pointers.delete(e.pointerId);
+    const upTarget = e.target as HTMLElement;
+    const inControls = !!upTarget.closest('.better-mermaid-controls');
+
+    if (this.pointers.size === 0) {
+      const wasPinching = this.pinchStartDist > 0;
+      this.isDragging = false;
+      this.pinchStartDist = 0;
+      this.viewport.removeClass('better-mermaid-grabbing');
+
+      if (tracked && !wasPinching && !this.dragMoved && !inControls) {
+        this.handleTap(e);
+      }
+      this.dragMoved = false;
+    } else if (this.pointers.size === 1) {
+      // One finger remains — resume single-finger panning from the current view.
+      this.pinchStartDist = 0;
+      this.isDragging = true;
+      const rest = Array.from(this.pointers.values())[0];
+      this.dragStartX = rest.x;
+      this.dragStartY = rest.y;
+      this.panStartX = this.panX;
+      this.panStartY = this.panY;
+    }
+  };
+
+  private onPointerCancel = (e: PointerEvent) => {
+    this.pointers.delete(e.pointerId);
     this.isDragging = false;
+    this.pinchStartDist = 0;
+    this.dragMoved = false;
     this.viewport.removeClass('better-mermaid-grabbing');
   };
+
+  /**
+   * Toggle between the fitted view (scale 1) and 2x zoom on a quick tap
+   * without significant movement.  Works for both touch and mouse
+   * (double-click).
+   */
+  private handleTap(e: PointerEvent) {
+    const now = Date.now();
+    const dx = e.clientX - this.lastTapX;
+    const dy = e.clientY - this.lastTapY;
+    const isDoubleTap =
+      now - this.lastTapTime < DOUBLE_TAP_MS &&
+      Math.hypot(dx, dy) < TAP_MOVE_TOLERANCE;
+
+    if (isDoubleTap) {
+      if (this.scale > 1.01) {
+        // Restore the fully fitted, centered view.
+        this.panX = 0;
+        this.panY = 0;
+        this.scale = 1;
+      } else {
+        // Zoom in, keeping the tapped diagram point stationary.
+        const pos = this.pointerPos(e);
+        const target = 2;
+        this.panX = pos.x - (pos.x - this.panX) * (target / this.scale);
+        this.panY = pos.y - (pos.y - this.panY) * (target / this.scale);
+        this.scale = target;
+      }
+      this.applyTransform();
+      this.syncZoomDisplay(this.scale);
+      // Reset so a third tap doesn't immediately toggle again.
+      this.lastTapTime = 0;
+    } else {
+      this.lastTapTime = now;
+      this.lastTapX = e.clientX;
+      this.lastTapY = e.clientY;
+    }
+  }
+
+  private pointerPos(e: PointerEvent): { x: number; y: number } {
+    const rect = this.viewport.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  private pointerDistance(): number {
+    const pts = Array.from(this.pointers.values());
+    if (pts.length < 2) return 0;
+    return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+
+  private pointerMidpoint(): { x: number; y: number } {
+    const pts = Array.from(this.pointers.values());
+    return {
+      x: (pts[0].x + pts[1].x) / 2,
+      y: (pts[0].y + pts[1].y) / 2,
+    };
+  }
 
   private applyTransform() {
     this.svgEl.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.scale})`;
@@ -301,8 +482,11 @@ export class MermaidImageModal extends Modal {
     // Clone the modal's SVG (which has fixTextOverflow CSS injected)
     // rather than the original reading-mode SVG.
     const cloned = this.svgEl.cloneNode(true) as SVGSVGElement;
-    // Remove the CSS transform (zoom/pan) so the export is at native size.
+    // Remove the CSS transform (zoom/pan) and the fitted pixel size so the
+    // export uses the native viewBox dimensions below.
     cloned.style.removeProperty('transform');
+    cloned.style.removeProperty('width');
+    cloned.style.removeProperty('height');
     const viewBox = cloned.getAttribute('viewBox');
     if (viewBox) {
       const parts = viewBox.split(/\s+/).map(Number);
