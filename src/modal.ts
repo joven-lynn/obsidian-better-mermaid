@@ -79,7 +79,7 @@ export class MermaidImageModal extends Modal {
     // Defer the initial size calculation until the browser has finished laying
     // out the modal (flex layout).  The ResizeObserver below handles subsequent
     // size changes (e.g. window resize).
-    requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
       this.applyView();
     });
 
@@ -88,7 +88,11 @@ export class MermaidImageModal extends Modal {
     });
     this.resizeObserver.observe(this.viewport);
 
-    const controls = this.viewport.createDiv({ cls: 'better-mermaid-controls' });
+    // The control bar is a regular flex item at the bottom of the modal
+    // (below the viewport), so it always stays visible — an absolutely
+    // positioned overlay inside the viewport could end up below the modal's
+    // visible area when the viewport overflows its height cap.
+    const controls = contentEl.createDiv({ cls: 'better-mermaid-controls' });
 
     controls.createEl('label', { text: this.t('zoom') });
 
@@ -463,6 +467,10 @@ export class MermaidImageModal extends Modal {
     // svgToPng).  Injected <style> elements are unreliable in that path.
     const fos = this.svgEl.querySelectorAll('foreignObject');
     fos.forEach((fo) => {
+      // Inline styles are required here: they must survive
+      // SVG→string→Image serialization in svgToPng, where external
+      // stylesheets (CSS classes) are unavailable.
+      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
       fo.setAttribute('style', 'font-size:13px;line-height:1.35');
       const walker = fo.ownerDocument.createTreeWalker(
         fo,
@@ -472,9 +480,12 @@ export class MermaidImageModal extends Modal {
       while (node) {
         const tag = node.tagName.toLowerCase();
         if (tag === 'div' || tag === 'p' || tag === 'span') {
+          // Same serialization requirement as above.
+          /* eslint-disable obsidianmd/no-static-styles-assignment */
           (node as HTMLElement).style.overflowWrap = 'break-word';
           (node as HTMLElement).style.wordBreak = 'break-word';
           (node as HTMLElement).style.whiteSpace = 'normal';
+          /* eslint-enable obsidianmd/no-static-styles-assignment */
         }
         node = walker.nextNode() as Element | null;
       }

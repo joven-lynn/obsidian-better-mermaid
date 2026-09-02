@@ -21,7 +21,11 @@ div.mermaid {
   position: relative;
   overflow: hidden;
   width: 100%;
-  flex: 1;
+  flex: 1 1 0%;
+  /* Allow the viewport to shrink when the modal hits its height cap
+     (e.g. max-height: 80vh); without this, min-height:auto keeps the
+     content at full size and pushes the bottom control bar out of view. */
+  min-height: 0;
   cursor: grab;
   background: var(--background-primary);
   /* Center the SVG in both axes; pan offsets (translate) apply on top of
@@ -52,20 +56,20 @@ div.mermaid {
 }
 
 .better-mermaid-controls {
-  position: absolute;
-  bottom: 8%;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
+  /* Bottom bar in normal document flow (below the viewport), so it can
+     never be pushed out of the modal's visible area. */
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 6px 14px;
-  background: rgba(128, 128, 128, 0.12);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  background: rgba(128, 128, 128, 0.06);
+  border-top: 1px solid rgba(128, 128, 128, 0.12);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(128, 128, 128, 0.16);
-  border-radius: 10px;
   pointer-events: auto;
 }
 
@@ -127,10 +131,10 @@ body.is-mobile .better-mermaid-modal-size {
 }
 
 body.is-mobile .better-mermaid-controls {
-  max-width: calc(100% - 24px);
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 
 body.is-mobile .better-mermaid-controls button,
