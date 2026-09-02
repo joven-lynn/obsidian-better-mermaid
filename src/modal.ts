@@ -80,11 +80,11 @@ export class MermaidImageModal extends Modal {
     // out the modal (flex layout).  The ResizeObserver below handles subsequent
     // size changes (e.g. window resize).
     requestAnimationFrame(() => {
-      this.fitSvgToViewport();
+      this.applyView();
     });
 
     this.resizeObserver = new ResizeObserver(() => {
-      this.fitSvgToViewport();
+      this.applyView();
     });
     this.resizeObserver.observe(this.viewport);
 
@@ -169,7 +169,7 @@ export class MermaidImageModal extends Modal {
     this.panX = 0;
     this.panY = 0;
     this.scale = 1;
-    this.applyTransform();
+    this.applyView();
     this.syncZoomDisplay(1);
   }
 
@@ -178,15 +178,14 @@ export class MermaidImageModal extends Modal {
   }
 
   private setZoom(scale: number) {
-    const rect = this.viewport.getBoundingClientRect();
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-
-    this.panX = cx - (cx - this.panX) * (scale / this.scale);
-    this.panY = cy - (cy - this.panY) * (scale / this.scale);
+    const ratio = scale / this.scale;
+    // Keep the diagram point currently under the viewport center fixed
+    // (anchors are expressed relative to the viewport center).
+    this.panX *= ratio;
+    this.panY *= ratio;
     this.scale = scale;
 
-    this.applyTransform();
+    this.applyView();
     this.syncZoomDisplay(scale);
   }
 
@@ -213,20 +212,23 @@ export class MermaidImageModal extends Modal {
     e.preventDefault();
     if (e.ctrlKey) {
       const rect = this.viewport.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const mx = e.clientX - rect.left - rect.width / 2;
+      const my = e.clientY - rect.top - rect.height / 2;
       const factor = 1 - e.deltaY * 0.005;
       const newScale = this.clampScale(this.scale * factor);
-      this.panX = mx - (mx - this.panX) * (newScale / this.scale);
-      this.panY = my - (my - this.panY) * (newScale / this.scale);
+      const ratio = newScale / this.scale;
+      this.panX = mx + (this.panX - mx) * ratio;
+      this.panY = my + (this.panY - my) * ratio;
       this.scale = newScale;
+      this.applyView();
       this.syncZoomDisplay(newScale);
     } else if (e.shiftKey) {
       this.panX -= e.deltaY;
+      this.updateTransform();
     } else {
       this.panY -= e.deltaY;
+      this.updateTransform();
     }
-    this.applyTransform();
   };
 
   private onPointerDown = (e: PointerEvent) => {
@@ -269,10 +271,15 @@ export class MermaidImageModal extends Modal {
         this.pinchStartScale * (dist / this.pinchStartDist),
       );
       // Keep the diagram point under the pinch midpoint stationary.
+      const rect = this.viewport.getBoundingClientRect();
       const mid = this.pointerMidpoint();
-      this.panX = mid.x - (mid.x - this.panX) * (newScale / this.scale);
-      this.panY = mid.y - (mid.y - this.panY) * (newScale / this.scale);
+      const mx = mid.x - rect.width / 2;
+      const my = mid.y - rect.height / 2;
+      const ratio = newScale / this.scale;
+      this.panX = mx + (this.panX - mx) * ratio;
+      this.panY = my + (this.panY - my) * ratio;
       this.scale = newScale;
+      this.applyView();
       this.syncZoomDisplay(newScale);
     } else if (this.pointers.size === 1 && this.isDragging) {
       if (
@@ -284,7 +291,7 @@ export class MermaidImageModal extends Modal {
       if (e.cancelable) e.preventDefault();
       this.panX = this.panStartX + (pos.x - this.dragStartX);
       this.panY = this.panStartY + (pos.y - this.dragStartY);
-      this.applyTransform();
+      this.updateTransform();
     }
   };
 
@@ -345,12 +352,16 @@ export class MermaidImageModal extends Modal {
       } else {
         // Zoom in, keeping the tapped diagram point stationary.
         const pos = this.pointerPos(e);
+        const rect = this.viewport.getBoundingClientRect();
+        const mx = pos.x - rect.width / 2;
+        const my = pos.y - rect.height / 2;
         const target = 2;
-        this.panX = pos.x - (pos.x - this.panX) * (target / this.scale);
-        this.panY = pos.y - (pos.y - this.panY) * (target / this.scale);
+        const ratio = target / this.scale;
+        this.panX = mx + (this.panX - mx) * ratio;
+        this.panY = my + (this.panY - my) * ratio;
         this.scale = target;
       }
-      this.applyTransform();
+      this.applyView();
       this.syncZoomDisplay(this.scale);
       // Reset so a third tap doesn't immediately toggle again.
       this.lastTapTime = 0;
@@ -380,17 +391,23 @@ export class MermaidImageModal extends Modal {
     };
   }
 
-  private applyTransform() {
-    this.svgEl.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.scale})`;
+  /**
+   * Reposition the SVG (translate only — never CSS scale).  Scaling is done
+   * by changing the SVG's pixel size in applyView(), so the browser
+   * re-renders the vector content at the exact target size instead of
+   * upscaling a raster texture (which would blur text and strokes).
+   */
+  private updateTransform() {
+    this.svgEl.style.transform = `translate(${this.panX}px, ${this.panY}px)`;
   }
 
   /**
-   * Size the SVG to fit within the viewport while preserving its native
-   * aspect ratio (derived from the viewBox attribute).  Without this the
-   * CSS `width:100%; height:100%` would stretch the diagram
-   * non-uniformly, squeezing text in one direction.
+   * Size the SVG to the viewport-fit dimensions (derived from the viewBox
+   * attribute, aspect ratio preserved) multiplied by the current zoom level.
+   * The viewport flex-centers the SVG (see styles.css); pan offsets from
+   * updateTransform() are applied on top of that centering.
    */
-  private fitSvgToViewport() {
+  private applyView() {
     const viewBox = this.svgEl.getAttribute('viewBox');
     if (!viewBox) return;
 
@@ -409,21 +426,22 @@ export class MermaidImageModal extends Modal {
     const svgAspect = vbWidth / vbHeight;
     const vpAspect = vpWidth / vpHeight;
 
-    let svgWidth: number;
-    let svgHeight: number;
+    let fitWidth: number;
+    let fitHeight: number;
 
     if (svgAspect > vpAspect) {
       // SVG is wider than viewport — fit by width
-      svgWidth = vpWidth;
-      svgHeight = vpWidth / svgAspect;
+      fitWidth = vpWidth;
+      fitHeight = vpWidth / svgAspect;
     } else {
       // SVG is taller or equal — fit by height
-      svgHeight = vpHeight;
-      svgWidth = vpHeight * svgAspect;
+      fitHeight = vpHeight;
+      fitWidth = vpHeight * svgAspect;
     }
 
-    this.svgEl.style.width = `${svgWidth}px`;
-    this.svgEl.style.height = `${svgHeight}px`;
+    this.svgEl.style.width = `${fitWidth * this.scale}px`;
+    this.svgEl.style.height = `${fitHeight * this.scale}px`;
+    this.updateTransform();
   }
 
   /**

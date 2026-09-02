@@ -12,7 +12,9 @@ div.mermaid {
 }
 
 .better-mermaid-svg {
-  /* Dimensions are set dynamically by modal.ts to preserve aspect ratio. */
+  /* The SVG must not get static width/height/max constraints here: modal.ts
+     sizes it precisely (fit-to-viewport × zoom level) so vector content is
+     re-rendered crisply at every zoom step. */
 }
 
 .better-mermaid-viewport {
@@ -22,6 +24,11 @@ div.mermaid {
   flex: 1;
   cursor: grab;
   background: var(--background-primary);
+  /* Center the SVG in both axes; pan offsets (translate) apply on top of
+     this centering. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   /* Let the plugin handle pan/pinch itself; without this the browser
      hijacks touch gestures for page scrolling and zooming on mobile. */
   touch-action: none;
@@ -35,13 +42,9 @@ div.mermaid {
 }
 
 .better-mermaid-viewport svg {
-  /* Dimensions are set dynamically by modal.ts to preserve aspect ratio.
-     These max constraints act as a safety net in case JS hasn't sized the
-     SVG yet (e.g. during the first paint frame). */
-  max-width: 100%;
-  max-height: 100%;
-  transform-origin: 0 0;
-  will-change: transform;
+  /* No sizing constraints: the SVG's rendered size may exceed the viewport
+     when zoomed in, so max-width/max-height rules would clamp it.  The
+     viewport flex-centers it; modal.ts sets exact pixel dimensions. */
 }
 
 .better-mermaid-controls {
