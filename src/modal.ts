@@ -69,9 +69,9 @@ export class MermaidImageModal extends Modal {
     this.svgEl.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     this.svgEl.addClass('better-mermaid-svg');
 
-    // Fix text squeezing: inject CSS into the SVG so that foreignObject
-    // content wraps properly instead of overflowing or being clipped.
-    this.fixTextOverflow();
+    // Text wrapping for foreignObject content is handled by styles.css
+    // (scoped to the modal); the exported PNG embeds the same rules in
+    // svgToPng, since standalone SVG images can't use the plugin stylesheet.
 
     this.viewport = contentEl.createDiv({ cls: 'better-mermaid-viewport' });
     this.viewport.appendChild(this.svgEl);
@@ -450,48 +450,6 @@ export class MermaidImageModal extends Modal {
     this.updateTransform();
   }
 
-  /**
-   * Fix text squeezing inside mermaid SVG nodes.
-   *
-   * Mermaid's layout engine often underestimates the width needed for CJK
-   * text and emoji, leaving foreignObject containers too narrow.  We inject
-   * a <style> element into the cloned SVG that:
-   *  1. Slightly reduces the base font-size so existing text fits better.
-   *  2. Forces word-wrap on foreignObject content to prevent horizontal
-   *     overflow.
-   *  3. Ensures node labels remain visible and readable.
-   */
-  private fixTextOverflow() {
-    // Walk every foreignObject and set inline styles directly on child
-    // elements so the fix survives SVG→string→Image serialization (used by
-    // svgToPng).  Injected <style> elements are unreliable in that path.
-    const fos = this.svgEl.querySelectorAll('foreignObject');
-    fos.forEach((fo) => {
-      // Inline styles are required here: they must survive
-      // SVG→string→Image serialization in svgToPng, where external
-      // stylesheets (CSS classes) are unavailable.
-      // eslint-disable-next-line obsidianmd/no-static-styles-assignment
-      fo.setAttribute('style', 'font-size:13px;line-height:1.35');
-      const walker = fo.ownerDocument.createTreeWalker(
-        fo,
-        NodeFilter.SHOW_ELEMENT,
-      );
-      let node: Element | null = walker.currentNode as Element;
-      while (node) {
-        const tag = node.tagName.toLowerCase();
-        if (tag === 'div' || tag === 'p' || tag === 'span') {
-          // Same serialization requirement as above.
-          /* eslint-disable obsidianmd/no-static-styles-assignment */
-          (node as HTMLElement).style.overflowWrap = 'break-word';
-          (node as HTMLElement).style.wordBreak = 'break-word';
-          (node as HTMLElement).style.whiteSpace = 'normal';
-          /* eslint-enable obsidianmd/no-static-styles-assignment */
-        }
-        node = walker.nextNode() as Element | null;
-      }
-    });
-  }
-
   private async handleDownload(btn: HTMLButtonElement) {
     const originalText = Platform.isMobile
       ? this.t('savePng')
@@ -564,8 +522,7 @@ export class MermaidImageModal extends Modal {
   }
 
   private svgToPng(): Promise<string> {
-    // Clone the modal's SVG (which has fixTextOverflow CSS injected)
-    // rather than the original reading-mode SVG.
+    // Clone the modal's SVG rather than the original reading-mode SVG.
     const cloned = this.svgEl.cloneNode(true) as SVGSVGElement;
     // Remove the CSS transform (zoom/pan) and the fitted pixel size so the
     // export uses the native viewBox dimensions below.
@@ -580,6 +537,22 @@ export class MermaidImageModal extends Modal {
         cloned.setAttribute('height', String(parts[3]));
       }
     }
+
+    // The exported SVG is rendered as a standalone image, where the plugin's
+    // stylesheet is unavailable — embed the same text-wrapping rules that
+    // styles.css applies to the modal so CJK/emoji labels don't get squeezed
+    // in the PNG either.
+    const fixCss =
+      'foreignObject{font-size:13px;line-height:1.35}' +
+      'foreignObject div,foreignObject p,foreignObject span{' +
+      'overflow-wrap:break-word;word-break:break-word;white-space:normal' +
+      '}';
+    const styleEl = cloned.ownerDocument.createElementNS(
+      'http://www.w3.org/2000/svg',
+      'style',
+    );
+    styleEl.textContent = fixCss;
+    cloned.insertBefore(styleEl, cloned.firstChild);
 
     const serializer = new XMLSerializer();
     const svgString = serializer.serializeToString(cloned);

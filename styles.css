@@ -11,6 +11,24 @@ div.mermaid {
   overflow: hidden;
 }
 
+/* Mermaid's layout often underestimates the width needed for CJK text and
+   emoji, leaving foreignObject labels too narrow.  Slightly reduce the base
+   font size and force wrapping, scoped to the modal so other SVG content is
+   unaffected.  The exported PNG embeds the same rules in svgToPng because a
+   standalone SVG image can't use this stylesheet. */
+.modal-content.better-mermaid-modal foreignObject {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.modal-content.better-mermaid-modal foreignObject div,
+.modal-content.better-mermaid-modal foreignObject p,
+.modal-content.better-mermaid-modal foreignObject span {
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
+}
+
 .better-mermaid-svg {
   /* The SVG must not get static width/height/max constraints here: modal.ts
      sizes it precisely (fit-to-viewport × zoom level) so vector content is
